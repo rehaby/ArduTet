@@ -8,8 +8,8 @@
 
 enum {
   TET_I = 0x2222,
-  TET_L = 0x6222,
-  TET_J = 0x2226,
+  TET_L = 0x6220,
+  TET_J = 0x0226,
   TET_O = 0x0660,
   TET_S = 0x0630,
   TET_T = 0x0720,
