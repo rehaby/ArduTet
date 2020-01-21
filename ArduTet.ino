@@ -13,6 +13,10 @@
 Arduboy2 arduboy;
 
 Tet_State gTetState;
+ETet_GameState lastState = eGameOver;
+Point oldPlayTetromino[4] = {};
+Point oldNextTetromino[4] = {};
+
 
 static inline int16_t
 ConvertPlayAreaToScreenX(int16_t x);
@@ -30,7 +34,7 @@ static void
 DrawBottomBorder(int16_t X, int16_t Y);
 
 static void 
-DrawTeronmino(Piece * Piece, int16_t X, int16_t Y);
+DrawTeronmino(Piece * Piece, int16_t X, int16_t Y, Point * oldState);
 
 static void 
 DrawCurrentPlayArea(uint8_t * PlayArea);
@@ -39,7 +43,7 @@ static void
 DrawLevelAndScore(uint16_t level, uint32_t score);
 
 static void 
-DrawGameState();
+DrawGameState(uint8_t UpdateType);
 
 static void
 DrawStateWithText(const char * __restrict__ const text);
@@ -68,7 +72,7 @@ void loop() {
   }
 
   arduboy.pollButtons();
-  arduboy.clear();
+  //arduboy.clear();
 
   EButtons pressed = eNone;
   if (arduboy.pressed(A_BUTTON)) {
@@ -85,7 +89,13 @@ void loop() {
     pressed = eDown;
   }
 
-  DoGameTick(pressed, &gTetState);
+  uint8_t updateType = DoGameTick(pressed, &gTetState);
+
+  if (lastState != gTetState.m_State) {
+    arduboy.clear();
+    lastState = gTetState.m_State;
+    updateType = PIECE_UPDATED | PLAYAREA_UPDATED;
+  }
 
   switch(gTetState.m_State) {
   case eInit:
@@ -95,10 +105,10 @@ void loop() {
     DrawLevelSelect(gTetState.m_Level);
     break;
   case eGame:
-    DrawGameState();
+    DrawGameState(updateType);
     break;
   case ePaused:
-    DrawGameState();
+    DrawGameState(updateType);
     DrawStateWithText("Pause");
     break;
   case eGameOver:
@@ -138,6 +148,23 @@ DrawBlock(int16_t X, int16_t Y, uint8_t Colour)
   arduboy.drawPixel(X + 2 , Y + 2, Colour);
 }
 
+static void
+DrawSolidBlock(int16_t X, int16_t Y, uint8_t Colour)
+{
+  //arduboy.drawRect(X,Y,BLOCK_WIDTH, Colour);
+  arduboy.drawPixel(X + 0 , Y + 0, Colour);
+  arduboy.drawPixel(X + 0 , Y + 1, Colour);
+  arduboy.drawPixel(X + 0 , Y + 2, Colour);
+  
+  arduboy.drawPixel(X + 1 , Y + 0, Colour);
+  arduboy.drawPixel(X + 1 , Y + 1, Colour);
+  arduboy.drawPixel(X + 1 , Y + 2, Colour);
+  
+  arduboy.drawPixel(X + 2 , Y + 0, Colour);
+  arduboy.drawPixel(X + 2 , Y + 1, Colour);
+  arduboy.drawPixel(X + 2 , Y + 2, Colour);
+}
+
 static void 
 DrawSideBorder(int16_t X, int16_t Y) 
 {
@@ -170,20 +197,56 @@ DrawBottomBorder(int16_t X, int16_t Y)
   arduboy.drawPixel(X + 2 , Y + 2, WHITE);
 }
 
-static void 
-DrawTeronmino(Piece * Piece, int16_t X, int16_t Y)
+static int
+compare_coord(Point * a, Point * b)
 {
+  return (a && b && a->x == b->x && a->y == b->y);
+}
+
+
+
+static int
+compare_coord_array(Point * a, Point * b, int n)
+{
+  int i;
+  for (i = 0; i < n; ++i) {
+    if (!compare_coord(&(a[i]), &(b[i]))) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+
+static void 
+DrawTeronmino(Piece * Piece, int16_t X, int16_t Y, Point * oldState)
+{
+  Point newTetromino[4];
+  uint8_t i = 0;
   for (uint8_t y = 0; y < 4; ++y) {
     for (uint8_t x = 0; x < 4; ++x) {
       if (GetTerominoPart(Piece->m_Teromino, x, y, Piece->m_Rotation)) {
-        DrawBlock(X + (x * BLOCK_WIDTH), Y + (y * BLOCK_WIDTH), WHITE);
+        //DrawBlock(X + (x * BLOCK_WIDTH), Y + (y * BLOCK_WIDTH), WHITE);
+        newTetromino[i  ].x = X + (x * BLOCK_WIDTH);
+        newTetromino[i++].y = Y + (y * BLOCK_WIDTH);
       }
     }
   }
+
+  if (!compare_coord_array(newTetromino, oldState, 4)) {
+    for (uint8_t i = 0; i < 4; ++i) {
+      DrawSolidBlock(oldState[i].x, oldState[i].y, BLACK);
+    }
+
+    for (uint8_t i = 0; i < 4; ++i) {
+      DrawBlock(newTetromino[i].x, newTetromino[i].y, WHITE);
+    }
+    memcpy(oldState, newTetromino, sizeof(Point) * 4);
+  }
 }
 
-static void 
-DrawCurrentPlayArea(uint8_t * PlayArea)
+static void
+DrawBoarder(void)
 {
   // TODO make this heaps better
   
@@ -205,13 +268,19 @@ DrawCurrentPlayArea(uint8_t * PlayArea)
   // Create hole in sides
   arduboy.drawPixel(PLAY_START_X - 1, PLAY_END_Y + 1, BLACK);
   arduboy.drawPixel(PLAY_END_X  ,     PLAY_END_Y + 1, BLACK);
-  
+}
 
+static void 
+DrawCurrentPlayArea(uint8_t * PlayArea)
+{
+  // TODO make this heaps better
   for (int16_t y = 0; y < PLAYAREA_HEIGHT; ++y) {
     for (int16_t x = 0; x < PLAYAREA_WIDTH; ++x) {
       uint8_t v = PlayArea[y * PLAYAREA_WIDTH + x];
       if (v > 0) {
         DrawBlock(ConvertPlayAreaToScreenX(x), ConvertPlayAreaToScreenY(y), v == 1 ? WHITE : BLACK);
+      } else {
+        DrawSolidBlock(ConvertPlayAreaToScreenX(x), ConvertPlayAreaToScreenY(y),BLACK);
       }
     }
   }
@@ -233,18 +302,28 @@ DrawLevelAndScore(uint16_t level, uint32_t score)
 }
 
 static void 
-DrawGameState()
+DrawGameState(uint8_t UpdateType)
 {
-  DrawCurrentPlayArea(&(gTetState.m_PlayArea[0]));
+  if (UpdateType & PLAYAREA_UPDATED) {
+    DrawBoarder();
+    DrawCurrentPlayArea(&(gTetState.m_PlayArea[0]));
+    
+    const int16_t nextPieceX = PLAY_END_X + 20;
+    const int16_t nextPieceY = PLAY_START_Y + 20;
+    DrawTeronmino(&(gTetState.m_NextPiece), nextPieceX, nextPieceY, oldNextTetromino);
+    memset(oldPlayTetromino, 0, sizeof(Point) * 4);
+  }
 
-  const int16_t pieceX = ConvertPlayAreaToScreenX(gTetState.m_Piece.m_X);
-  const int16_t pieceY = ConvertPlayAreaToScreenY(gTetState.m_Piece.m_Y);
-  DrawTeronmino(&(gTetState.m_Piece), pieceX, pieceY);
-  DrawLevelAndScore(gTetState.m_Level, gTetState.m_Score);
+
+  if (UpdateType & PIECE_UPDATED) {
+    const int16_t pieceX = ConvertPlayAreaToScreenX(gTetState.m_Piece.m_X);
+    const int16_t pieceY = ConvertPlayAreaToScreenY(gTetState.m_Piece.m_Y);
+    DrawTeronmino(&(gTetState.m_Piece), pieceX, pieceY, oldPlayTetromino);
+
+    DrawLevelAndScore(gTetState.m_Level, gTetState.m_Score);
+  }
+
   
-  const int16_t nextPieceX = PLAY_END_X + 20;
-  const int16_t nextPieceY = PLAY_START_Y + 20;
-  DrawTeronmino(&(gTetState.m_NextPiece), nextPieceX, nextPieceY);
 }
 
 static void

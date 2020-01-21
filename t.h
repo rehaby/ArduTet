@@ -7,6 +7,10 @@ extern "C" {
 #define PLAYAREA_COUNT (PLAYAREA_WIDTH * PLAYAREA_HEIGHT)
 #define BAG_COUNT 7
 
+#define NO_UPDATE 0
+#define PLAYAREA_UPDATED 1
+#define PIECE_UPDATED 2
+
 typedef enum {
   eNone,
   eLeft,
@@ -14,7 +18,8 @@ typedef enum {
   eUp,
   eDown,
   eA,
-  eB
+  eB,
+  eExit
 } EButtons;
 
 typedef enum {
@@ -49,7 +54,7 @@ typedef struct {
   uint32_t m_TopScore;
   uint8_t m_Gravity;
   uint8_t m_GravityFrames;
-  uint16_t m_Level;
+  uint8_t m_Level;
   uint32_t m_TotalRowsCleared;
   EButtons m_CurrentButton;
   uint8_t m_ButtonFrames;
@@ -61,7 +66,7 @@ uint8_t
 GetTerominoPart(uint16_t Teromino, int16_t X, int16_t Y, ERotation Rotation);
 
 void
-init_tet(Tet_State *__restrict__ pState, uint8_t Level, uint32_t TopScore );
+init_tet(Tet_State *pState, uint8_t Level, uint32_t TopScore );
 
 uint8_t 
 DoGameTick(EButtons button, Tet_State * pState );
