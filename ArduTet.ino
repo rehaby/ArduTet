@@ -226,6 +226,10 @@ DrawLevelAndScore(uint16_t level, uint32_t score)
   arduboy.setCursor(0, 10);
   arduboy.print("S: ");
   arduboy.print(score);
+
+  arduboy.setCursor(0, 20);
+  arduboy.print("C: ");
+  arduboy.print(arduboy.cpuLoad());
 }
 
 static void 
