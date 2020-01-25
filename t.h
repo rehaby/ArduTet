@@ -10,6 +10,7 @@ extern "C" {
 #define NO_UPDATE 0
 #define PLAYAREA_UPDATED 1
 #define PIECE_UPDATED 2
+#define PLAYAREA_LINE 4
 
 typedef enum {
   eNone,
@@ -60,6 +61,7 @@ typedef struct {
   uint8_t m_ButtonFrames;
   ETet_GameState m_State;
   uint8_t m_StateFrames;
+  uint8_t m_TopMostBlockInBoard;
 } Tet_State;
 
 uint8_t

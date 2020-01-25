@@ -33,7 +33,7 @@ static const uint16_t kTetromino[] = { TET_I, TET_L, TET_J, TET_O, TET_S, TET_T,
  * Function Defs
  */
 
-static int16_t
+static uint8_t
 DoesPieceFit(Tet_State *pState, ERotation Rotation, int16_t X, int16_t Y);
 
 static void
@@ -97,6 +97,7 @@ init_tet(Tet_State * pState, uint8_t Level, uint32_t TopScore )
   pState->m_ButtonFrames = 0;
   pState->m_State = eInit;
   pState->m_StateFrames = 0;
+  pState->m_TopMostBlockInBoard = PLAYAREA_HEIGHT;
  
   FillBag(pState);
 
@@ -131,7 +132,7 @@ GetTerominoPart(uint16_t Teromino, int16_t X, int16_t Y, ERotation Rotation)
   return 0;
 }
 
-static int16_t
+static uint8_t
 DoesPieceFit(Tet_State *pState, ERotation Rotation, int16_t X, int16_t Y)
 {
   uint8_t y;
@@ -148,12 +149,12 @@ DoesPieceFit(Tet_State *pState, ERotation Rotation, int16_t X, int16_t Y)
             pX < 0 ||
             pX >= PLAYAREA_WIDTH ||
             pState->m_PlayArea[(pY * PLAYAREA_WIDTH) + pX] != 0) {
-          return -1;
+          return 0;
         }
       }
     }
   }
-  return 0;
+  return 1;
 }
 
 static void
@@ -168,6 +169,8 @@ LockPieceInBoard(Tet_State *pState)
       const int16_t pX = pState->m_Piece.m_X + x;
 
       if (GetTerominoPart(pState->m_Piece.m_Teromino, x, y, pState->m_Piece.m_Rotation)) {
+        /* lower number is higher up the board */
+        pState->m_TopMostBlockInBoard = MIN(pState->m_TopMostBlockInBoard, pY); 
         pState->m_PlayArea[(pY * PLAYAREA_WIDTH) + pX] = 1;
       }
     }
@@ -203,15 +206,16 @@ CheckForLines(Tet_State *pState, int16_t Y)
   int16_t y;
   for (y = Y; y < maxY; ++y) {
     int16_t line = 1;
+    int16_t rowIndex = y * PLAYAREA_WIDTH;
     int16_t x;
     for(x = 0; x < PLAYAREA_WIDTH; ++x) {
-      line &= pState->m_PlayArea[(y * PLAYAREA_WIDTH) + x] != 0;
+      line &= pState->m_PlayArea[rowIndex + x] != 0;
     }
 
     if (line) {
       found += 1;
       for(x = 0; x < PLAYAREA_WIDTH; ++x) {
-        pState->m_PlayArea[(y * PLAYAREA_WIDTH) + x] = 2;
+        pState->m_PlayArea[rowIndex + x] = 2;
       }
     }
   }
@@ -226,18 +230,22 @@ CleanUpLines(Tet_State *pState)
   for (y = PLAYAREA_HEIGHT - 1; y >= 0; --y) {
     if (pState->m_PlayArea[y * PLAYAREA_WIDTH] == 2) {
       int16_t x;
-      bCleanedUpALine = 1;
+      ++bCleanedUpALine;
       for (x = 0; x < PLAYAREA_WIDTH; ++x) {
         int16_t yy;
         for (yy = y; yy >= 1; --yy) {
-          pState->m_PlayArea[(yy * PLAYAREA_WIDTH) + x] =
-            pState->m_PlayArea[ ((yy-1) * PLAYAREA_WIDTH) + x];
+          int16_t rowIndex = yy * PLAYAREA_WIDTH;
+          pState->m_PlayArea[rowIndex + x] =
+            pState->m_PlayArea[ rowIndex - PLAYAREA_WIDTH + x];
         }
         pState->m_PlayArea[x] = 0;
       }
       ++y; /* process the line again as we moved it down */
     }
   }
+
+  /* Lower down the board is a higher number */
+  pState->m_TopMostBlockInBoard += bCleanedUpALine;
 
   return bCleanedUpALine;
 }
@@ -306,20 +314,21 @@ static uint8_t
 DoGameState(EButtons button, Tet_State *pState)
 {
   if (pState->m_StateFrames > 0) {
-    uint8_t bCleanedALine = 0;
     ++(pState->m_StateFrames);
     if (pState->m_StateFrames >= 61) {
-      bCleanedALine = CleanUpLines(pState);
+      CleanUpLines(pState);
       pState->m_StateFrames = 0;
       NextPiece(pState);
-      if (DoesPieceFit(pState,
-                       pState->m_Piece.m_Rotation,
-                       0, 0) < 0) {
+      if (!DoesPieceFit(pState,
+                        pState->m_Piece.m_Rotation,
+                        0, 0) < 0) {
         /*Game over!*/
+        TransitionGameState(pState, eGameOver);
         return PLAYAREA_UPDATED;
       }
+      return PLAYAREA_UPDATED | PLAYAREA_LINE;
     }
-    return bCleanedALine > 0 ? PLAYAREA_UPDATED : NO_UPDATE;
+    return NO_UPDATE;
   }
 
   switch(button) {
@@ -333,7 +342,7 @@ DoGameState(EButtons button, Tet_State *pState)
 
       if (DoesPieceFit(pState,
                        pState->m_Piece.m_Rotation,
-                       0, 1)  == 0) {
+                       0, 1)) {
         ++(pState->m_Piece.m_Y);
         return PIECE_UPDATED;
       } else {
@@ -344,13 +353,13 @@ DoGameState(EButtons button, Tet_State *pState)
           pState->m_Score += CalculateRowClearScore(pState, rowsCleared);
           pState->m_TotalRowsCleared +=rowsCleared;
           pState->m_StateFrames = 1;
-          return PLAYAREA_UPDATED;
+          return PLAYAREA_LINE;
         }
 
         NextPiece(pState);
-        if (DoesPieceFit(pState,
-                         pState->m_Piece.m_Rotation,
-                         0, 0) < 0) {
+        if (!DoesPieceFit(pState,
+                          pState->m_Piece.m_Rotation,
+                          0, 0)) {
           /*Game over!*/
           TransitionGameState(pState, eGameOver);
         }
@@ -362,7 +371,7 @@ DoGameState(EButtons button, Tet_State *pState)
     if (ShouldActOnButtonPress(pState, button, eRepeatOnDelay) &&
         DoesPieceFit(pState,
                      pState->m_Piece.m_Rotation,
-                     -1, 0) == 0) {
+                     -1, 0)) {
       --(pState->m_Piece.m_X);
       return PIECE_UPDATED;
     }
@@ -371,7 +380,7 @@ DoGameState(EButtons button, Tet_State *pState)
     if (ShouldActOnButtonPress(pState, button, eRepeatOnDelay) &&
         DoesPieceFit(pState,
                      pState->m_Piece.m_Rotation,
-                     1, 0) == 0) {
+                     1, 0)) {
       ++(pState->m_Piece.m_X);
       return PIECE_UPDATED;
     }
@@ -380,30 +389,30 @@ DoGameState(EButtons button, Tet_State *pState)
     if (ShouldActOnButtonPress(pState, button, eRepeat) &&
         DoesPieceFit(pState,
                      pState->m_Piece.m_Rotation,
-                     0, 1) == 0) {
+                     0, 1) ) {
       ++(pState->m_Piece.m_Y);
       if (pState->m_ButtonFrames > 0) {
         ++(pState->m_Score);
-      return PIECE_UPDATED;
       }
+      return PIECE_UPDATED;
     }
     break;
   case eA: /*Rotate*/
     if (ShouldActOnButtonPress(pState, button, eOneShot)) {
       if (DoesPieceFit(pState,
                        (pState->m_Piece.m_Rotation + 1) % 4,
-                       0, 0) == 0) {
+                       0, 0)) {
         pState->m_Piece.m_Rotation = (pState->m_Piece.m_Rotation + 1) % 4;
         return PIECE_UPDATED;
       } else if (DoesPieceFit(pState,
                        (pState->m_Piece.m_Rotation + 1) % 4,
-                       1, 0) == 0) {
+                       1, 0)) {
         ++(pState->m_Piece.m_X);
         pState->m_Piece.m_Rotation = (pState->m_Piece.m_Rotation + 1) % 4;
         return PIECE_UPDATED;
       } else if (DoesPieceFit(pState,
                        (pState->m_Piece.m_Rotation + 1) % 4,
-                       -1, 0) == 0) {
+                       -1, 0)) {
         --(pState->m_Piece.m_X);
         pState->m_Piece.m_Rotation = (pState->m_Piece.m_Rotation + 1) % 4;
         return PIECE_UPDATED;

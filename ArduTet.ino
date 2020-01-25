@@ -10,13 +10,15 @@
 #define PLAY_END_X (PLAY_START_X + (PLAYAREA_WIDTH  * BLOCK_WIDTH))
 #define PLAY_END_Y (PLAY_START_Y + (PLAYAREA_HEIGHT * BLOCK_WIDTH))
 
-Arduboy2 arduboy;
+static Arduboy2 arduboy;
 
-Tet_State gTetState;
-ETet_GameState lastState = eGameOver;
-Point oldPlayTetromino[4] = {};
-Point oldNextTetromino[4] = {};
-
+static Tet_State gTetState;
+static ETet_GameState lastState = eGameOver;
+static Point oldPlayTetromino[4] = {};
+static Point oldNextTetromino[4] = {};
+static uint8_t oldLevel = 30;
+static uint32_t oldScore = 0xFFFFFFFF;
+static PROGMEM const uint8_t blockBitmap[3] = {0x7,0x5,0x7};
 
 static inline int16_t
 ConvertPlayAreaToScreenX(int16_t x);
@@ -24,42 +26,48 @@ ConvertPlayAreaToScreenX(int16_t x);
 static inline int16_t
 ConvertPlayAreaToScreenY(int16_t y);
 
-static void 
+static void
 DrawBlock(int16_t X, int16_t Y, uint8_t Colour);
 
-static void 
-DrawSideBorder(int16_t X, int16_t Y);
+static void
+DrawSideBorder();
 
-static void 
-DrawBottomBorder(int16_t X, int16_t Y);
+static void
+DrawBottomBorder();
 
-static void 
-DrawTeronmino(Piece * Piece, int16_t X, int16_t Y, Point * oldState);
+static void
+DrawTetronmino(Piece * Piece, int16_t X, int16_t Y, Point * oldState);
 
-static void 
-DrawCurrentPlayArea(uint8_t * PlayArea);
+static void
+DrawCurrentPlayArea(uint8_t * PlayArea , uint8_t TopMostBlock);
+
+static void
+DrawLabelsAndBox(void);
 
 static void
 DrawLevelAndScore(uint16_t level, uint32_t score);
 
-static void 
+static void
 DrawGameState(uint8_t UpdateType);
 
 static void
 DrawStateWithText(const char * __restrict__ const text);
 
 static void
+DrawCpuUsage(void);
+
+static void
 DrawLevelSelect(uint16_t level);
 
+static void
+DrawBoarder(void);
 
 void setup() {
+  Serial.begin(9600);
   // put your setup code here, to run once:
   arduboy.begin();
   arduboy.setFrameRate(60);
   arduboy.initRandomSeed();
-
-  Serial.write("SETUP\n");
-  Serial.flush();
 
   init_tet(&gTetState, 0, 0);
 }
@@ -72,7 +80,6 @@ void loop() {
   }
 
   arduboy.pollButtons();
-  //arduboy.clear();
 
   EButtons pressed = eNone;
   if (arduboy.pressed(A_BUTTON)) {
@@ -93,27 +100,49 @@ void loop() {
 
   if (lastState != gTetState.m_State) {
     arduboy.clear();
+    oldScore = 0xFFFFFFF;
+    oldLevel = 30;
     lastState = gTetState.m_State;
-    updateType = PIECE_UPDATED | PLAYAREA_UPDATED;
-  }
+    updateType = PIECE_UPDATED | PLAYAREA_UPDATED | PLAYAREA_LINE;
 
-  switch(gTetState.m_State) {
-  case eInit:
-    DrawStateWithText("ArduTet");
-    break;
-  case eLevelSelection:
-    DrawLevelSelect(gTetState.m_Level);
-    break;
-  case eGame:
-    DrawGameState(updateType);
-    break;
-  case ePaused:
-    DrawGameState(updateType);
-    DrawStateWithText("Pause");
-    break;
-  case eGameOver:
-    DrawStateWithText("Game Over");
-    break;
+
+    switch(gTetState.m_State) {
+    case eInit:
+      DrawStateWithText("ArduTet");
+      break;
+    case eLevelSelection:
+      DrawLevelSelect(gTetState.m_Level);
+      break;
+    case eGame:
+      DrawCpuUsage();
+      DrawBoarder();
+      DrawLabelsAndBox();
+      DrawGameState(updateType);
+      break;
+    case ePaused:
+      DrawBoarder();
+      DrawGameState(updateType);
+      DrawStateWithText("Pause");
+      break;
+    case eGameOver:
+      DrawStateWithText("Game Over");
+      break;
+    }
+  } else {
+
+    switch(gTetState.m_State) {
+    case eInit:
+    case ePaused:
+    case eGameOver:
+      break;
+    case eLevelSelection:
+      DrawLevelSelect(gTetState.m_Level);
+      break;
+    case eGame:
+      DrawCpuUsage();
+      DrawGameState(updateType);
+      break;
+    }
   }
 
   arduboy.display();
@@ -132,69 +161,33 @@ ConvertPlayAreaToScreenY(int16_t y)
 }
 
 
-static void 
-DrawBlock(int16_t X, int16_t Y, uint8_t Colour) 
+static void
+DrawBlock(int16_t X, int16_t Y, uint8_t Colour)
 {
-  arduboy.drawPixel(X + 0 , Y + 0, Colour);
-  arduboy.drawPixel(X + 0 , Y + 1, Colour);
-  arduboy.drawPixel(X + 0 , Y + 2, Colour);
-  
-  arduboy.drawPixel(X + 1 , Y + 0, Colour);
-  arduboy.drawPixel(X + 1 , Y + 1, Colour == WHITE ? BLACK : WHITE);
-  arduboy.drawPixel(X + 1 , Y + 2, Colour);
-  
-  arduboy.drawPixel(X + 2 , Y + 0, Colour);
-  arduboy.drawPixel(X + 2 , Y + 1, Colour);
-  arduboy.drawPixel(X + 2 , Y + 2, Colour);
+  arduboy.drawBitmap(X, Y, blockBitmap, BLOCK_WIDTH, BLOCK_WIDTH, Colour);
 }
 
 static void
 DrawSolidBlock(int16_t X, int16_t Y, uint8_t Colour)
 {
-  //arduboy.drawRect(X,Y,BLOCK_WIDTH, Colour);
-  arduboy.drawPixel(X + 0 , Y + 0, Colour);
-  arduboy.drawPixel(X + 0 , Y + 1, Colour);
-  arduboy.drawPixel(X + 0 , Y + 2, Colour);
-  
-  arduboy.drawPixel(X + 1 , Y + 0, Colour);
-  arduboy.drawPixel(X + 1 , Y + 1, Colour);
-  arduboy.drawPixel(X + 1 , Y + 2, Colour);
-  
-  arduboy.drawPixel(X + 2 , Y + 0, Colour);
-  arduboy.drawPixel(X + 2 , Y + 1, Colour);
-  arduboy.drawPixel(X + 2 , Y + 2, Colour);
+  arduboy.fillRect(X,Y,BLOCK_WIDTH, BLOCK_WIDTH, Colour);
 }
 
-static void 
-DrawSideBorder(int16_t X, int16_t Y) 
+static void
+DrawSideBorder()
 {
-  arduboy.drawPixel(X + 0 , Y + 0, WHITE);
-  arduboy.drawPixel(X + 0 , Y + 1, WHITE);
-  arduboy.drawPixel(X + 0 , Y + 2, WHITE);
-  
-  arduboy.drawPixel(X + 1 , Y + 0, BLACK);
-  arduboy.drawPixel(X + 1 , Y + 1, BLACK);
-  arduboy.drawPixel(X + 1 , Y + 2, BLACK);
-  
-  arduboy.drawPixel(X + 2 , Y + 0, WHITE);
-  arduboy.drawPixel(X + 2 , Y + 1, WHITE);
-  arduboy.drawPixel(X + 2 , Y + 2, WHITE);
+  arduboy.drawFastVLine(PLAY_START_X - 1, PLAY_START_Y, PLAY_END_Y - PLAY_START_Y + 1, WHITE);
+  arduboy.drawFastVLine(PLAY_END_X,       PLAY_START_Y, PLAY_END_Y - PLAY_START_Y + 1, WHITE);
+
+  arduboy.drawFastVLine(PLAY_START_X - BLOCK_WIDTH, PLAY_START_Y, PLAY_END_Y - PLAY_START_Y + BLOCK_WIDTH, WHITE);
+  arduboy.drawFastVLine(PLAY_END_X + 2,             PLAY_START_Y, PLAY_END_Y - PLAY_START_Y + BLOCK_WIDTH, WHITE);
 }
 
-static void 
-DrawBottomBorder(int16_t X, int16_t Y) 
+static void
+DrawBottomBorder()
 {
-  arduboy.drawPixel(X + 0 , Y + 0, WHITE);
-  arduboy.drawPixel(X + 0 , Y + 1, BLACK);
-  arduboy.drawPixel(X + 0 , Y + 2, WHITE);
-  
-  arduboy.drawPixel(X + 1 , Y + 0, WHITE);
-  arduboy.drawPixel(X + 1 , Y + 1, BLACK);
-  arduboy.drawPixel(X + 1 , Y + 2, WHITE);
-  
-  arduboy.drawPixel(X + 2 , Y + 0, WHITE);
-  arduboy.drawPixel(X + 2 , Y + 1, BLACK);
-  arduboy.drawPixel(X + 2 , Y + 2, WHITE);
+  arduboy.drawFastHLine(PLAY_START_X - 1, PLAY_END_Y, PLAY_END_X - PLAY_START_X + 1, WHITE);
+  arduboy.drawFastHLine(PLAY_START_X - 2, PLAY_END_Y + 2, PLAY_END_X - PLAY_START_X + 4, WHITE);
 }
 
 static int
@@ -202,8 +195,6 @@ compare_coord(Point * a, Point * b)
 {
   return (a && b && a->x == b->x && a->y == b->y);
 }
-
-
 
 static int
 compare_coord_array(Point * a, Point * b, int n)
@@ -217,16 +208,14 @@ compare_coord_array(Point * a, Point * b, int n)
   return 1;
 }
 
-
-static void 
-DrawTeronmino(Piece * Piece, int16_t X, int16_t Y, Point * oldState)
+static void
+DrawTetronmino(Piece * Piece, int16_t X, int16_t Y, Point * oldState)
 {
   Point newTetromino[4];
   uint8_t i = 0;
   for (uint8_t y = 0; y < 4; ++y) {
     for (uint8_t x = 0; x < 4; ++x) {
       if (GetTerominoPart(Piece->m_Teromino, x, y, Piece->m_Rotation)) {
-        //DrawBlock(X + (x * BLOCK_WIDTH), Y + (y * BLOCK_WIDTH), WHITE);
         newTetromino[i  ].x = X + (x * BLOCK_WIDTH);
         newTetromino[i++].y = Y + (y * BLOCK_WIDTH);
       }
@@ -235,7 +224,9 @@ DrawTeronmino(Piece * Piece, int16_t X, int16_t Y, Point * oldState)
 
   if (!compare_coord_array(newTetromino, oldState, 4)) {
     for (uint8_t i = 0; i < 4; ++i) {
-      DrawSolidBlock(oldState[i].x, oldState[i].y, BLACK);
+      if (oldState[i].x > 0 && oldState[i].y > 0) {
+        DrawBlock(oldState[i].x, oldState[i].y, BLACK);
+      }
     }
 
     for (uint8_t i = 0; i < 4; ++i) {
@@ -248,82 +239,94 @@ DrawTeronmino(Piece * Piece, int16_t X, int16_t Y, Point * oldState)
 static void
 DrawBoarder(void)
 {
-  // TODO make this heaps better
-  
-  // Fill in play area
-  for (int16_t y = PLAY_START_Y; y <= PLAY_END_Y; ++y) {
-      DrawSideBorder(PLAY_START_X - BLOCK_WIDTH,y);
-      DrawSideBorder(PLAY_END_X,y);
-  }
-  for (int16_t x = PLAY_START_X; x <= PLAY_END_X - BLOCK_WIDTH; ++x) {
-    DrawBottomBorder(x,PLAY_END_Y);
-  }
-  
+  DrawSideBorder();
+  DrawBottomBorder();
+
   // Draw caps
   arduboy.drawPixel(PLAY_START_X - 2 , PLAY_START_Y,   WHITE);
-  arduboy.drawPixel(PLAY_START_X- 2,   PLAY_END_Y + 2, WHITE);
   arduboy.drawPixel(PLAY_END_X + 1 ,   PLAY_START_Y,   WHITE);
-  arduboy.drawPixel(PLAY_END_X + 1 ,   PLAY_END_Y + 2, WHITE);
-  
-  // Create hole in sides
-  arduboy.drawPixel(PLAY_START_X - 1, PLAY_END_Y + 1, BLACK);
-  arduboy.drawPixel(PLAY_END_X  ,     PLAY_END_Y + 1, BLACK);
 }
 
-static void 
-DrawCurrentPlayArea(uint8_t * PlayArea)
+static void
+DrawCurrentPlayArea(uint8_t * PlayArea, uint8_t TopMostBlock)
 {
-  // TODO make this heaps better
-  for (int16_t y = 0; y < PLAYAREA_HEIGHT; ++y) {
-    for (int16_t x = 0; x < PLAYAREA_WIDTH; ++x) {
+  // We only draw from the top most block down
+  // This should make drawing faster
+  arduboy.fillRect(PLAY_START_X, TopMostBlock, PLAY_END_X - PLAY_START_X, PLAY_END_Y - TopMostBlock, BLACK);
+  int16_t pixelX = PLAY_START_X;
+  int16_t pixelY = PLAY_START_Y;
+  for (int16_t y = TopMostBlock; y < PLAYAREA_HEIGHT; ++y, pixelY += BLOCK_WIDTH) {
+    for (int16_t x = 0; x < PLAYAREA_WIDTH; ++x, pixelX += BLOCK_WIDTH) {
       uint8_t v = PlayArea[y * PLAYAREA_WIDTH + x];
       if (v > 0) {
         DrawBlock(ConvertPlayAreaToScreenX(x), ConvertPlayAreaToScreenY(y), v == 1 ? WHITE : BLACK);
-      } else {
-        DrawSolidBlock(ConvertPlayAreaToScreenX(x), ConvertPlayAreaToScreenY(y),BLACK);
       }
     }
   }
 }
 
 static void
-DrawLevelAndScore(uint16_t level, uint32_t score)
+DrawCpuUsage(void)
 {
-  arduboy.setCursor(0, 0);
-  arduboy.print("L: ");
-  arduboy.print(level);
-  arduboy.setCursor(0, 10);
-  arduboy.print("S: ");
-  arduboy.print(score);
+  /*static int oldCpuLoad = 0;
 
-  arduboy.setCursor(0, 20);
-  arduboy.print("C: ");
-  arduboy.print(arduboy.cpuLoad());
+  int cpuLoad = arduboy.cpuLoad();
+  if (cpuLoad != oldCpuLoad) {
+    oldCpuLoad = cpuLoad;
+    Serial.println(oldCpuLoad);
+  }*/
 }
 
-static void 
+static void
+DrawLabelsAndBox(void)
+{
+  arduboy.setCursor(0, 0);
+  arduboy.print("Level:");
+  arduboy.setCursor(PLAY_END_X + 5, 0);
+  arduboy.print("Score:");
+}
+
+static void
+DrawLevelAndScore(uint16_t level, uint32_t score)
+{
+  if (oldLevel != level) {
+    oldLevel = level;
+    arduboy.setCursor(0, 10);
+    arduboy.print(level);
+  }
+
+  if (oldScore != score) {
+    oldScore = score;
+    arduboy.setCursor(PLAY_END_X + 5, 10);
+    arduboy.print(score);
+  }
+
+  /* Box for next piece */
+  const int16_t nextPieceX = PLAY_END_X + 20;
+  const int16_t nextPieceY = PLAY_START_Y + 20;
+  arduboy.drawRect(nextPieceX - 1, nextPieceY - 1, 4 * BLOCK_WIDTH + 2, 4 * BLOCK_WIDTH + 2);
+}
+
+static void
 DrawGameState(uint8_t UpdateType)
 {
   if (UpdateType & PLAYAREA_UPDATED) {
-    DrawBoarder();
-    DrawCurrentPlayArea(&(gTetState.m_PlayArea[0]));
-    
     const int16_t nextPieceX = PLAY_END_X + 20;
     const int16_t nextPieceY = PLAY_START_Y + 20;
-    DrawTeronmino(&(gTetState.m_NextPiece), nextPieceX, nextPieceY, oldNextTetromino);
+    DrawTetronmino(&(gTetState.m_NextPiece), nextPieceX, nextPieceY, oldNextTetromino);
     memset(oldPlayTetromino, 0, sizeof(Point) * 4);
   }
-
 
   if (UpdateType & PIECE_UPDATED) {
     const int16_t pieceX = ConvertPlayAreaToScreenX(gTetState.m_Piece.m_X);
     const int16_t pieceY = ConvertPlayAreaToScreenY(gTetState.m_Piece.m_Y);
-    DrawTeronmino(&(gTetState.m_Piece), pieceX, pieceY, oldPlayTetromino);
-
+    DrawTetronmino(&(gTetState.m_Piece), pieceX, pieceY, oldPlayTetromino);
     DrawLevelAndScore(gTetState.m_Level, gTetState.m_Score);
   }
 
-  
+  if (UpdateType & PLAYAREA_LINE) {
+    DrawCurrentPlayArea(&(gTetState.m_PlayArea[0]), gTetState.m_TopMostBlockInBoard);
+  }
 }
 
 static void
@@ -335,11 +338,13 @@ DrawStateWithText(const char * __restrict__ const text)
   arduboy.setTextSize(1);
 }
 
-
 static void
 DrawLevelSelect(uint16_t level)
 {
-  DrawStateWithText("Select Level");
-  arduboy.setCursor(0,20);
-  arduboy.print(level);
+  if (oldLevel != level) {
+    oldLevel = level;
+    DrawStateWithText("Select Level");
+    arduboy.setCursor(0,20);
+    arduboy.print(level);
+  }
 }
